@@ -1,0 +1,71 @@
+aws cloudformation create-stack \
+    --template-body file://jenkins-all.json \
+    --stack-name pipelinestack \
+    --capabilities CAPABILITY_IAM \
+    --parameters \
+        ParameterKey=keyName,ParameterValue=thibeaultKeyPair \
+        ParameterKey=dockerImage,ParameterValue='quay.io/therealdwright/jenkins:latest' \
+        ParameterKey=instanceType,ParameterValue=t2.micro \
+        ParameterKey=dnsPrefix,ParameterValue=jenkins \
+        ParameterKey=dnsZone,ParameterValue=tbo.cloud \
+        ParameterKey=myPublicIp,ParameterValue='174.51.50.15/32' \
+        ParameterKey=s3Bucket,ParameterValue=pipeline-backup9887 \
+        ParameterKey=publicSubnets,ParameterValue='subnet-fa98afa3\,subnet-26adb051\,subnet-cbaa62f6\,subnet-eb1135c0' \
+        ParameterKey=privateSubnets,ParameterValue='subnet-fa98afa3\,subnet-26adb051\,subnet-cbaa62f6\,subnet-eb1135c0' \
+        ParameterKey=vpcId,ParameterValue=vpc-394f9c5d \
+        ParameterKey=bastionHostSecurityGroup,ParameterValue=sg-80b256fa \
+        ParameterKey=snsTopic,ParameterValue='arn:aws:sns:us-east-1:724662056237:myEmail'
+
+
+
+
+aws cloudformation create-stack \
+    --template-body file://jenkins-tmp.json \
+    --stack-name pipelinestack3 \
+    --capabilities CAPABILITY_IAM \
+    --parameters \
+        ParameterKey=keyName,ParameterValue=thibeaultKeyPair \
+        ParameterKey=dockerImage,ParameterValue='quay.io/therealdwright/jenkins:latest' \
+        ParameterKey=instanceType,ParameterValue=t2.micro \
+        ParameterKey=dnsPrefix,ParameterValue=jenkins3 \
+        ParameterKey=dnsZone,ParameterValue=heffermangulch.com \
+        ParameterKey=myPublicIp,ParameterValue='174.51.50.15/32' \
+        ParameterKey=s3Bucket,ParameterValue=pipeline-backup9887 \
+        ParameterKey=publicSubnets,ParameterValue='subnet-fa98afa3\,subnet-26adb051\,subnet-cbaa62f6\,subnet-eb1135c0' \
+        ParameterKey=privateSubnets,ParameterValue='subnet-fa98afa3\,subnet-26adb051\,subnet-cbaa62f6\,subnet-eb1135c0' \
+        ParameterKey=vpcId,ParameterValue=vpc-394f9c5d \
+        ParameterKey=elbSecurityGroup,ParameterValue=sg-95a046ef \
+        ParameterKey=jenkinsHostSecurityGroup,ParameterValue=sg-70a1470a \
+        ParameterKey=jenkinsRole,ParameterValue=pipelinestack-jenkinsRole-10YY31Z289EA2 \
+        ParameterKey=snsTopic,ParameterValue='arn:aws:sns:us-east-1:724662056237:myEmail'
+
+
+
+
+ # Launch user data
+
+ #!/bin/bash -ex
+ # Helper function
+ function error_exit
+ {
+   cfn-signal -e 1 -r "$1" 'https://cloudformation-waitcondition-us-east-1.s3.amazonaws.com/arn%3Aaws%3Acloudformation%3Aus-east-1%3A724662056237%3Astack/pipelinestack/c3606420-573b-11e6-a097-50d5ca6e601e/waitHandle?AWSAccessKeyId=AKIAIIT3CWAIMJYUTISA&Expires=1470069057&Signature=%2FhKKxnZzlgiENpxBnruVCUSb4MA%3D'
+   exit 1
+ }
+ cfn-init -s pipelinestack -r launchConfig     --region us-east-1 || error_exit 'Failed to run cfn-init'
+ # Post-cfn work
+ echo Downloading cloudwatch logs setup agent
+ wget https://s3.amazonaws.com/aws-cloudwatch/downloads/latest/awslogs-agent-setup.py
+ echo running non-interactive cloudwatch-logs setup script
+ python ./awslogs-agent-setup.py --region us-east-1 --non-interactive --configfile=/root/awslogs.conf
+ # Handle case where cron doesn't detect the new /etc/cron.d file
+ service cron restart
+ # Attempt to restore from backup
+ export AWS_CONFIG_FILE=/etc/aws.conf
+ echo AWS_CONFIG_FILE=/etc/aws.conf >> /etc/environment
+ jenkins-restore s3://pipeline-backup9887/jk- /jenkins || true # ignore errors
+ # Start Jenkins
+ docker pull quay.io/therealdwright/jenkins:latest
+ docker run   -p 8080:8080   -d   --restart always   -v /jenkins:/jenkins   -v /var/run/docker.sock:/var/run/docker.sock   -v /root/.docker:/root/.docker   --log-driver=awslogs   --log-opt awslogs-region=us-east-1   --log-opt awslogs-group=pipelinestack-jenkinsLogGroup-13IYJZ91X2C46   --log-opt awslogs-stream=container-logs   quay.io/therealdwright/jenkins:latest|| error_exit 'Failed to launch Docker container'
+ # Signal success
+ cfn-signal -e 0 -r "Stack setup complete" 'https://cloudformation-waitcondition-us-east-1.s3.amazonaws.com/arn%3Aaws%3Acloudformation%3Aus-east-1%3A724662056237%3Astack/pipelinestack/c3606420-573b-11e6-a097-50d5ca6e601e/waitHandle?AWSAccessKeyId=AKIAIIT3CWAIMJYUTISA&Expires=1470069057&Signature=%2FhKKxnZzlgiENpxBnruVCUSb4MA%3D'
+ #EOF
